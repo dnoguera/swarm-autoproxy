@@ -81,7 +81,7 @@ func main() {
 				}
 			}
 			if isOnSameNetwork == false {
-				fmt.Println("El servicio  ", srv.Spec.Name, " NO esta en la misma red ", string(*serviceNetwork))
+				fmt.Println(" - El servicio  ", srv.Spec.Name, " NO esta en la misma red ", string(*serviceNetwork))
 				continue
 			}
 
@@ -102,7 +102,7 @@ func main() {
 				extPort = "80"
 			}
 			if val, ok := srv.Spec.Labels["intPort"]; !ok {
-				fmt.Println("No se ha especificado el puerto interno del servicio ", srv.Spec.Name, " ", val)
+				fmt.Println(" - No se ha especificado el puerto interno del servicio ", srv.Spec.Name, " ", val)
 				continue
 			}
 
@@ -133,33 +133,39 @@ func main() {
 
 		}
 
-		fmt.Println("DeepEqual::: ", reflect.DeepEqual(arrayData, arrayDataOld), " Len:", len(arrayData), " LenOld:", len(arrayDataOld))
+		// fmt.Println("DeepEqual::: ", reflect.DeepEqual(arrayData, arrayDataOld), " Len:", len(arrayData), " LenOld:", len(arrayDataOld))
 
-		if _, err := os.Stat(string(*outputFile)); err == nil {
-			// path/to/whatever exists
-			err = os.Remove(string(*outputFile))
+		sonIguales := reflect.DeepEqual(arrayData, arrayDataOld)
+
+		if !sonIguales {
+			if _, err := os.Stat(string(*outputFile)); err == nil {
+				// path/to/whatever exists
+				err = os.Remove(string(*outputFile))
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+			}
+
+			f, err := os.Create(string(*outputFile))
 			if err != nil {
-				fmt.Println(err)
+				fmt.Println("Create file Error: ", err)
 				return
 			}
-		}
+			if err := serviceTemplate.Execute(f, arrayData); err != nil {
+				fmt.Println(err)
+			}
 
-		f, err := os.Create(string(*outputFile))
-		if err != nil {
-			fmt.Println("Create file Error: ", err)
-			return
-		}
-		if err := serviceTemplate.Execute(f, arrayData); err != nil {
-			fmt.Println(err)
-		}
-
-		outputCmd, err := exec.Command("/bin/sh", "-c", string(*endCommand)).Output()
-		if err != nil {
-			fmt.Println("Failed to execute command: %s", outputCmd)
-			fmt.Println(err)
-		} else {
-			fmt.Println("RESULTADO Comando::::: ", string(outputCmd))
-		}
+			outputCmd, err := exec.Command("/bin/sh", "-c", string(*endCommand)).Output()
+			if err != nil {
+				fmt.Println("Failed to execute command: %s", outputCmd)
+				fmt.Println(err)
+			} else {
+				fmt.Println("RESULTADO Comando::::: ", string(outputCmd))
+			}
+		}else{
+                    fmt.Println(" - * No se han detectado cambios en los servicios de Swarm")
+                }
 
 		time.Sleep(delay)
 	} // End infinite loop
