@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"strings"
 	"github.com/fsouza/go-dockerclient"
 	"os"
 	"os/exec"
@@ -24,7 +25,7 @@ func main() {
 	templateFile := flag.String("servicetpl", "/etc/service.tpl", "Fichero de plantilla del que hacer rebuild")
 	endCommand := flag.String("cmd", "/etc/init.d/nginx reload", "Comando que se ejecutara al finalizar el rebuild de los ficheros de config")
 	outputFile := flag.String("destination", "/etc/nginx/conf.d/templateresult.conf", "Fichero resultante despues de aplicar rebuild de config")
-	serviceNetwork := flag.String("network", "proxy-http", "Red en la que han de estar los servicios que se añadiran al proxy")
+	serviceNetwork := flag.String("network", "any", "Red en la que han de estar los servicios que se añadiran al proxy")
 
 	flag.Parse()
 
@@ -56,8 +57,9 @@ func main() {
 		arrayData = arrayData[:0]
 
 		var isOnSameNetwork bool
-		var servicePath string
-		var extPort string
+		//var servicePath string
+		//var extPort string
+
 
 		for _, srv := range services {
 			//fmt.Println("ID: ", srv.ID)
@@ -65,9 +67,12 @@ func main() {
 			fmt.Println(" - Procesando servicio: Spec.Name=", srv.Spec.Name)
 			//fmt.Println("Spec.Labels: %v ", srv.Spec.Labels)
 
-			if val, ok := srv.Spec.Labels["proxy"]; !ok {
-				fmt.Println(" - NO El servicio  ", srv.Spec.Name, " no está en proxy ", val)
-				continue
+			if val1, ok := srv.Spec.Labels["com.autoproxy.proxy"]; !ok {
+				
+				if val2, ok := srv.Spec.TaskTemplate.ContainerSpec.Labels["com.autoproxy.proxy"]; !ok {
+					fmt.Println(" - NO El servicio  ", srv.Spec.Name, " no está en proxy ", string(val1) + string(val2) )
+					continue
+				}
 			} //else{
 			//    fmt.Println(" - SI El servicio " , srv.Spec.Name , " si está en proxy: " , val)
 			//}
@@ -78,40 +83,74 @@ func main() {
 				if network.Target == string(*serviceNetwork) {
 					//fmt.Println("SI El servicio  " , srv.Spec.Name , "  está en la red ", string(*serviceNetwork))
 					isOnSameNetwork = true
+				}else{
+					fmt.Println(" - Red no igual ", "==", network.Target )
 				}
 			}
-			if isOnSameNetwork == false {
-				fmt.Println(" - El servicio  ", srv.Spec.Name, " NO esta en la misma red ", string(*serviceNetwork))
+			if isOnSameNetwork == false && string(*serviceNetwork) != "any" {
+				fmt.Println(" - El servicio  ", srv.Spec.Name, " NO esta en la misma red ", string(*serviceNetwork) )
 				continue
 			}
 
-			if val, ok := srv.Spec.Labels["domain"]; !ok {
-				fmt.Println(" - El servicio  ", srv.Spec.Name, " no tiene un dominio configurado", val)
-				continue
+			
+			serviceDomain := ""
+			if val, ok := srv.Spec.Labels["com.autoproxy.domain"]; !ok {
+				if val2, ok := srv.Spec.TaskTemplate.ContainerSpec.Labels["com.autoproxy.domain"]; !ok {
+					fmt.Println(" - El servicio  ", srv.Spec.Name, " no tiene un dominio configurado", val, val2)
+					continue
+				}else{
+					 serviceDomain = srv.Spec.TaskTemplate.ContainerSpec.Labels["com.autoproxy.domain"]
+				}
+			}else{
+				serviceDomain = srv.Spec.Labels["com.autoproxy.domain"]
 			}
 
-			if val, ok := srv.Spec.Labels["path"]; ok {
+			servicePath := "/"
+			if val, ok := srv.Spec.Labels["com.autoproxy.path"]; ok {
 				servicePath = val
 			} else {
-				servicePath = "/"
+                if val2, ok := srv.Spec.TaskTemplate.ContainerSpec.Labels["com.autoproxy.path"]; ok {
+                    servicePath = val2
+                }else{
+					servicePath = "/"
+				}
 			}
 
-			if val, ok := srv.Spec.Labels["extPort"]; ok {
+			extPort := "80"
+			if val, ok := srv.Spec.Labels["com.autoproxy.extPort"]; ok {
 				extPort = val
 			} else {
-				extPort = "80"
+				if val2, ok := srv.Spec.TaskTemplate.ContainerSpec.Labels["com.autoproxy.extPort"]; !ok {
+					extPort = "80"
+				}else{
+					extPort = val2
+				}
 			}
-			if val, ok := srv.Spec.Labels["intPort"]; !ok {
-				fmt.Println(" - No se ha especificado el puerto interno del servicio ", srv.Spec.Name, " ", val)
-				continue
+
+			intPort := "80"
+			if val, ok := srv.Spec.Labels["com.autoproxy.intPort"]; !ok {
+				if val2, ok := srv.Spec.TaskTemplate.ContainerSpec.Labels["com.autoproxy.intPort"]; !ok {
+					fmt.Println(" - No se ha especificado el puerto interno del servicio ", srv.Spec.Name, " ", val)
+					continue
+				}else{
+					intPort =  val2
+				}
+			}else{
+				intPort = srv.Spec.Labels["com.autoproxy.intPort"]
+			}
+
+			serviceName := srv.Spec.Name
+			if val, ok := srv.Spec.Labels["com.docker.stack.namespace"]; ok {
+				serviceName = strings.Replace(srv.Spec.Name, srv.Spec.Labels["com.docker.stack.namespace"] + "_", "", 1 )
+				fmt.Println(" - Dentro de un Stack, usando prefijo: ", val)
 			}
 
 			// Vamos creando estructura
 			entry := &ServiceEntry{
-				ServiceName:         srv.Spec.Name,
-				ServiceDomain:       srv.Spec.Labels["domain"],
+				ServiceName:         serviceName,
+				ServiceDomain:       serviceDomain,
 				ServicePath:         servicePath,
-				ServiceInternalPort: srv.Spec.Labels["intPort"],
+				ServiceInternalPort: intPort,
 				ServiceExternalPort: extPort,
 			}
 
